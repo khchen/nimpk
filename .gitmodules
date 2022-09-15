@@ -1,0 +1,4 @@
+[submodule "pocketlang"]
+	path = pocketlang
+	url = https://github.com/khchen/pocketlang
+	branch = devel
