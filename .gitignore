@@ -1,0 +1,8 @@
+# Compiled Dynamic libraries
+*.so
+*.dylib
+*.dll
+build/
+
+# Executables
+*.exe

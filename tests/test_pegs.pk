@@ -1,0 +1,174 @@
+#====================================================================
+#
+#             NimPK - PocketLang Binding for Nim
+#                  Copyright (c) 2022 Ward
+#
+#====================================================================
+
+from pegs import Peg
+
+def treerepr(node, indent = 0)
+  result = ""
+  while node
+    result += " " * indent + str(node) + "\n"
+    result += treerepr(node.head, indent + 2)
+    node = node.next
+  end
+  return result
+end
+
+def collect(node, name)
+  result = []
+  while node
+    if name == node.name
+      result.append(node.text)
+    end
+    result += collect(node.head, name)
+    node = node.next
+  end
+  return result
+end
+
+def test0
+  matches = []
+  peg = Peg r"{\ident} '=' {\d+}"
+  assert str(peg) == 'Peg(r"({([A-Z_a-z] [0-9A-Z_a-z]*)} \'=\' {([0-9] [0-9]*)})")'
+
+  assert peg.match("abc=123", matches)
+  assert matches == ["abc", "123"]
+
+  assert peg.matchLen("abc=123") == 7
+  assert peg.find("123=abc; def=456") == 9
+  assert peg.contains("123=abc; def=456")
+  assert peg.findBounds("123=abc; def=456") == 9..15
+  assert peg.findAll("abc=123; def=456") == ["abc=123", "def=456"]
+  assert peg.startsWith("abc=123; def=456")
+  assert peg.endsWith("abc=123; def=456")
+
+  switch = fn (n, list) return "${list[1]}=${list[0]}" end
+  assert peg.replace("abc=123; def=456", switch) == "123=abc; 456=def"
+  assert peg.replace("abc=123; def=456", "xxx") == "xxx; xxx"
+  assert peg.replacef("abc=123; def=456", r"$2=$1") == "123=abc; 456=def"
+
+  matches = []
+  peg = Peg r'{\d+}'
+  assert str(peg) == 'Peg(r"{([0-9] [0-9]*)}")'
+
+  assert peg.match("123", matches)
+  assert matches == ["123"]
+
+  assert not peg.match("abc", matches)
+  assert matches == []
+
+  assert peg.matchLen("123", matches) == 3
+  assert matches == ["123"]
+
+  assert peg.matchLen("abc", matches) == -1
+  assert matches == []
+
+  assert peg.find("abc123", matches) == 3
+  assert matches == ["123"]
+
+  assert peg.find("abcdef", matches) == -1
+  assert matches == []
+
+  assert peg.contains("abc123", matches)
+  assert matches == ["123"]
+
+  assert not peg.contains("abcdef", matches)
+  assert matches == []
+
+  assert peg.findBounds("abc123", matches) == 3..5
+  assert matches == ["123"]
+
+  assert peg.findBounds("abcdef", matches) == -1..0
+  assert matches == []
+
+  assert peg.findAll("abc123def456") == ["123", "456"]
+  assert peg.split("abc123def456") == ["abc", "def"]
+
+  assert not peg.startsWith("abc123")
+  assert peg.endsWith("abc123")
+
+  assert peg.replace("abc123def456", "#") == "abc#def#"
+  assert peg.replace("abc123def456", fn (n, list)
+    return list[0].split().reverse().join() # reverse a string
+  end) == "abc321def654"
+
+  peg = Peg r"{\ident}'='{\ident}"
+  assert peg.replacef("key1=var1; key2=var2", r"$2->$1") == "var1->key1; var2->key2"
+end
+
+def test1
+  peg = Peg r'
+    start <- (space* word)*
+    word <- \w+
+    space <- \s+
+  '
+
+  node = peg.parse("A quick fox jump over the lazy dog")
+  # print(treerepr(node))
+  assert collect(node, "word") == ["A", "quick", "fox", "jump", "over", "the", "lazy", "dog"]
+end
+
+def test2
+  peg = Peg r'
+    \skip(\s*)
+    expression <- term !.
+    term <- factor ((add / minus) factor)*
+    factor <- unary ((mul / div) unary)*
+    unary <- primary / (add / minus)? unary
+    primary <- integer / "(" term ")"
+    integer <- \d+
+
+    add <- "+"
+    minus <- "-"
+    mul <- "*"
+    div <- "/"
+  '
+
+  eval = fn (node)
+    if node.name in ["@root", "primary"]
+      return eval(node.head)
+
+    elif node.name in ["term", "factor"]
+      result = 0
+      node = node.head
+      while node
+        if node.name == "add" then node = node.next; result += eval(node)
+        elif node.name == "minus" then node = node.next; result -= eval(node)
+        elif node.name == "mul" then node = node.next; result *= eval(node)
+        elif node.name == "div" then node = node.next; result /= eval(node)
+        else result = eval(node) end
+        node = node.next
+      end
+      return result
+
+    elif node.name == "unary"
+      if node.head.name == "minus"
+        return -eval(node.tail)
+      else
+        return eval(node.tail)
+      end
+
+    elif node.name == "integer"
+      return Number(node.text)
+    end
+  end
+
+  node = peg.parse("1+2*3")
+  # print(treerepr(node))
+  assert(collect(node, 'integer') == ["1", "2", "3"])
+  assert(eval(node) == 7)
+
+  node = peg.parse("(-1 + 4/2*3 - 1) * (5 + 6) ")
+  # print(treerepr(node))
+  assert(collect(node, 'integer') == ["1", "4", "2", "3", "1", "5", "6"])
+  assert(eval(node) == 44)
+end
+
+test0()
+test1()
+test2()
+
+print "All TESTS PASSED"

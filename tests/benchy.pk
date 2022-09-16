@@ -1,0 +1,120 @@
+#====================================================================
+#
+#             NimPK - PocketLang Binding for Nim
+#                  Copyright (c) 2022 Ward
+#
+#====================================================================
+
+# https://github.com/treeform/benchy
+
+import time, math
+
+def nowMs
+  return time.monotime() / 1000000
+end
+
+def total(l)
+  ## Computes total of a sequence.
+  result = 0
+  for v in l
+    result += v
+  end
+  return result
+end
+
+def listmin(l)
+  ## Computes min of a sequence.
+  result = l[0]
+  for i in 1..l.length
+    result = min(l[i], result)
+  end
+  return result
+end
+
+def mean(l)
+  ## Computes mean (average) of a sequence.
+  nan = 0/0
+  if l.length == 0 then return nan end
+  return total(l) / l.length
+end
+
+def variance(l)
+  ## Computes the sample variance of a sequence.
+  result = 0
+  if l.length <= 1 then return result end
+  a = mean(l)
+  for v in l
+    result += (v - a) ** 2
+  end
+  return result / (l.length - 1)
+end
+
+def stddev(l)
+  ## Computes the sample standard deviation of a sequence.
+  return math.sqrt(variance(l))
+end
+
+def removeOutliers(l)
+  ## Remove numbers that are above 2 standard deviation.
+  avg = mean(l)
+  std = stddev(l)
+  i = 0
+  while i < l.length
+    if math.abs(l[i] - avg) > std * 2
+      l.pop(i)
+    else
+      i += 1
+    end
+  end
+end
+
+shownHeader = false
+
+def timeIt(t1, t2)
+  func = fn end
+  name = "nop"
+
+  if t1 is Closure
+    func = t1
+    name = func.name
+  elif t2 is Closure
+    func = t2
+    name = func.name
+  end
+
+  if t1 is String
+    name = t1
+  elif t2 is String
+    name = t2
+  end
+
+  if not shownHeader
+    shownHeader = true
+    print("name ............................... min time      avg time    std dv   runs")
+  end
+
+  num = 0
+  times = 0
+  deltas = []
+
+  while true
+    num += 1
+    start = nowMs()
+    func()
+    finish = nowMs()
+    delta = finish - start
+    times += delta
+    deltas.append(delta)
+
+    if times > 5000 or num >= 1000 then break end
+  end
+
+  minDelta = listmin(deltas)
+  removeOutliers(deltas)
+
+  m = "%0.3f" % minDelta
+  s = "%0.3f" % mean(deltas)
+  d = "%0.3f" % stddev(deltas)
+  readout = "%s ms %10s ms %10s  %5s" % [m, s, '±' + str(d), 'x' + str(num)]
+  print(name, '.' * (40 - name.length - m.length), readout)
+end

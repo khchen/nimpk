@@ -1,0 +1,13 @@
+#====================================================================
+#
+#             NimPK - PocketLang Binding for Nim
+#                  Copyright (c) 2022 Ward
+#
+#====================================================================
+
+import mylib
+
+assert mylib.hello() == "hello from dynamic lib."
+assert mylib.data == "mylib"
+
+print "All TESTS PASSED"

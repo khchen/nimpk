@@ -1,0 +1,142 @@
+# https://www.gavalas.dev/blog/spigot-algorithms-for-pi-in-python/
+
+from bigints import BigInt as _
+from io import write, stdout
+import io
+
+write = fn (n) write(stdout, str(n)) end
+_0 = _(0); _1 = _(1); _2 = _(2); _3 = _(3); _4 = _(4); _5 = _(5)
+_7 = _(7); _8 = _(8); _10 = _(10); _12 = _(12); _27 = _(27);
+_60 = _(60); _125 = _(125); _180 = _(180); _216 = _(216); _675 = _(675)
+
+def leibniz_pi(limit = 1000)
+  result = []
+  q = _1; r = _0; t = _1; k = _1; n = _3; l = _3
+  while true
+    if (_4 * q + r - t < n * t)
+      result.append n
+      limit -= 1; if limit <= 0 then return result end
+
+      nr = _10 * (r - n * t)
+      n = _10 * (_3 * q + r) / t - _10 * n
+      q *= _10
+      r = nr
+    else
+      nr = (_2 * q + r) * l
+      nn = (q * _7 * k + _2 + r * l) / (t * l)
+      q *= k
+      t *= l
+      l += _2
+      k += _1
+      n = nn
+      r = nr
+    end
+  end
+end
+
+def gibbons_lamberts_pi(limit = 1000)
+  result = []
+  q = _0; r = _4; s = _1; t = _0; n = _4; i = _1
+  while true
+    if n == (q * (_5 * i - _2) + _2 * r) / (s * (_5 * i - _2) + _2 * t)
+      result.append n
+      limit -= 1; if limit <= 0 then return result end
+
+      nn = (_10 * ((q - n * s) * (_2 * i - _1) + r - n * t)) / (s * (_2 * i - _1) + t)
+      q = _10 * q - _10 * n * s
+      r = _10 * r - _10 * n * t
+      n = nn
+    else
+      n = ((_5 * i * i - _1) * q + (_2 * i + _1) * r) / ((_5 * i * i - _1) * s + (_2 * i + _1) * t)
+      nq = (_2 * i - _1) * q + r
+      r = i * i * q
+      ns = (_2 * i - _1) * s + t
+      t = i * i * s
+      i += _1
+      q = nq
+      s = ns
+    end
+  end
+end
+
+def lamberts_pi(limit = 1000)
+  result = []
+  k = _2; a = _4; b = _1; a1 = _12; b1 = _4
+  while true
+    p = k * k
+    q = _2 * k + _1
+    k += _1
+
+    na = a1
+    nb = b1
+    a1 = p * a + q * a1
+    b1 = p * b + q * b1
+    a = na
+    b = nb
+
+    d = a / b
+    d1 = a1 / b1
+    while d == d1
+      result.append d
+      limit -= 1; if limit <= 0 then return result end
+
+      a = _10 * (a % b)
+      a1 = _10 * (a1 % b1)
+      d = a / b
+      d1 = a1 / b1
+    end
+  end
+end
+
+def gospers_pi(limit = 1000)
+  result = []
+  q = _1; r = _0; t = _1; n = _8; i = _1
+  while true
+    if n == (q * (_675 * i - _216) + _125 * r) / (_125 * t)
+      result.append n
+      limit -= 1; if limit <= 0 then return result end
+
+      q = _10 * q
+      r = _10 * r - _10 * n * t
+    else
+      nq = i * (_2 * i - _1) * q
+      r = _3 * (_3 * i + _1) * (_3 * i + _2) * ((_5 * i - _2) * q + r)
+      t = _3 * (_3 * i + _1) * (_3 * i + _2) * t
+      q = nq
+      i += _1
+    end
+    n = (q * (_27 * i - _12) + _5 * r) / (_5 * t)
+  end
+end
+
+def gospers_pi_unproven(limit = 1000)
+  result = []
+  q = _1; r = _180; t = _60; i = _2
+  while true
+    u = _3 * (_3 * i + _1) * (_3 * i + _2)
+    y = (q * (_27 * i - _12) + _5 * r) / (_5 * t)
+    result.append y
+    limit -= 1; if limit <= 0 then return result end
+
+    nq = _10 * q * i * (_2 * i - _1)
+    r = _10 * u * (q * (_5 * i - _2) + r - y * t)
+    t *= u
+    q = nq
+    i += _1
+  end
+end
+
+from benchy import timeIt
+
+timeIt(fn leibniz_pi(1000) end, "leibniz_pi")
+timeIt(fn gibbons_lamberts_pi(1000) end, "gibbons_lamberts_pi")
+timeIt(fn lamberts_pi(1000) end, "lamberts_pi")
+timeIt(fn gospers_pi(1000) end, "gospers_pi")
+timeIt(fn gospers_pi_unproven(1000) end, "gospers_pi_unproven")
+
+# name ............................... min time      avg time    std dv   runs
+# leibniz_pi ....................... 482.770 ms    490.847 ms    ±9.967    x11
+# gibbons_lamberts_pi .............. 323.525 ms    331.251 ms    ±4.080    x16
+# lamberts_pi ...................... 176.006 ms    178.690 ms    ±1.413    x28
+# gospers_pi ....................... 237.979 ms    240.755 ms    ±1.762    x21
+# gospers_pi_unproven .............. 105.912 ms    107.666 ms    ±0.841    x47
