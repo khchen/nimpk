@@ -5,10 +5,13 @@
 #
 #====================================================================
 
-from utils import tryLoad
-mylib = tryLoad("mylib")
+import os, path
 
-assert mylib.hello() == "hello from dynamic lib."
-assert mylib.data == "mylib"
-
-print "All TESTS PASSED"
+def tryLoad(module)
+  pegs = load(module)
+  if not pegs
+    pegs = load(path.join(path.dirname(os.exepath()), module))
+  end
+  if not pegs then raise "Cannot import module '${module}'" end
+  return pegs
+end

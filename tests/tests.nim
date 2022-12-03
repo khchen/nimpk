@@ -5,9 +5,6 @@
 #
 #====================================================================
 
-# {.hint[Name]: off.}
-{.hint[XDeclaredButNotUsed]: off.}
-
 import std/[strutils, unittest, strformat, tables]
 import nimpk/src
 import nimpk
@@ -177,7 +174,7 @@ suite "Nim Binding of PocketLang":
         # vm.list(set), vm.list(tuple, valueOnly=true), or vm.list(object, valueOnly=false)
         #   => convert set, tuple, or object to List.
         # vm.map(set), vm.map(tuple), or vm.map(object)
-        #   => convert set, tuple, or object to List.
+        #   => convert set, tuple, or object to Map.
         check:
 
           vm.list({1, 3, 5}) == vm [1, 3, 5]
@@ -233,8 +230,8 @@ suite "Nim Binding of PocketLang":
           map["object[Foo]"] == "object[Foo]"
 
         # list.insert(x[, index = 0]) => insert an element into list
-        # list.insert(x[, index = 0]) => insert an element into list
         # list.add(x) => append an element into list.
+        # list.pop() => pop an element from list.
         list.clear()
         list.add 123.456
         list.add "hello"
@@ -242,6 +239,9 @@ suite "Nim Binding of PocketLang":
         list.insert Foo()
         check:
           list == vm.eval("['object[Foo]', true, 123.456, 'hello']")
+          list.pop() == "hello"
+          list.pop(-2) == true
+          list == vm.eval("['object[Foo]', 123.456]")
 
         # vm.import("module") => import a module
         # vm["module"] => syntax sugar for vm.import
@@ -372,7 +372,7 @@ suite "Nim Binding of PocketLang":
         """
 
         # Nim procedure can be binded as builtin function by vm.addFn(proc[, newname])
-        # First parameter of binded procedure can be `vm: NpVm` to pass the vm.
+        # Parameters of binded procedure can be `vm: NpVm` to pass the vm.
         # Only if all the parameters can be converted to nim type by to[T](),
         # the procedure will be invoke.
 

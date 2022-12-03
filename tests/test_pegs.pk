@@ -5,7 +5,8 @@
 #
 #====================================================================
 
-from pegs import Peg
+from utils import tryLoad
+Peg = tryLoad("pegs").Peg
 
 def treerepr(node, indent = 0)
   result = ""

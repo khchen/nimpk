@@ -40,7 +40,7 @@ type
     pkvm: ptr PkVM
 
   NpVar* = object
-    ## Object of NimPk variant.
+    ## Object of NimPk variable.
     vm: NpVm
     np: NpBox
 
@@ -60,23 +60,25 @@ converter convertNpVmToPkVm*(vm: NpVm): ptr PkVM {.inline.} =
   else: nil
 
 proc `=destroy`*(vm: var typeof(NpVm()[])) =
-  ## Destructors for NimPK VM.
+  ## `=destroy` hook of NimPK VM.
   if not vm.pkvm.isNil:
     pkFreeVM(vm.pkvm)
     vm.pkvm = nil
 
 proc `=destroy`*(x: var NpVar) =
-  ## Destructors for NimPK variant.
+  ## `=destroy` hook of NpVar.
   if isOk(x.vm) and x.np.isHandle:
     x.vm.pkReleaseHandle(x.handle)
 
 proc `=sink`*(x: var NpVar, y: NpVar) =
+  ## `=sink` hook of NpVar.
   `=destroy`(x)
   wasMoved(x)
   x.vm = y.vm
   x.np = y.np
 
 proc `=copy`*(x: var NpVar, y: NpVar) =
+  ## `=copy` hook of NpVar.
   if x.np == y.np:
     x.vm = y.vm # copy vm anyway, x.vm may be nil
     return
@@ -385,6 +387,19 @@ template insert*(v0: NpVar, x: untyped, index: int = 0) =
   v.vm[0] = v
   if not v.vm.pkListInsert(0, cint index, 1): reraise0(v.vm)
 
+proc pop*(v0: NpVar, index: int = -1): NpVar {.discardable.} =
+  ## Returns an element (last by default) of the list and decreases
+  ## list.length by one.
+  # v0 maybe expression instead of symobl
+  let v = v0
+  assert(v.vm != nil)
+  if not (v of NpList):
+    raise newException(NimPkError, "Expected a 'List'")
+
+  v.vm[0] = v
+  if not v.vm.pkListPop(0, cint index, 0): reraise0(v.vm)
+  result = v.vm[0]
+
 template add*(v: NpVar, x: untyped) =
   ## Add an element into list.
   insert(v, x, -1)
@@ -569,7 +584,7 @@ proc len*(v: NpVar): int =
     # error will be raised by `{}` if no implementation of "length"
     result = v{"length"}
 
-proc call*(v: NpVar, args: varargs[NpVar]): NpVar {.discardable} =
+proc call*(v: NpVar, args: varargs[NpVar]): NpVar {.discardable.} =
   ## Call a "callable" variable, aka method bind, closure, or class.
   assert(v.vm != nil)
   if v.np.kind notin {NpClosure, NpClass, NpMethodBind}:
@@ -1174,12 +1189,24 @@ proc addSource*(module: NpVar, source: string) =
   vm.pkModuleAddSource(handle(module), cstring source)
   if not vm.pkModuleInitialize(handle(module)): reraise0(vm)
 
-template addClass*(module0: NpVar, name: string, base: NpVar, doc: static[string],
+proc copyNimId(vm: NpVm, base: NpVar, to: NpVar) =
+  # copy _nimid if `base` is nim type binding class,
+  # so that to[]() and `[]=` works for instance of inherited class
+  assert base of NpClass and to of NpClass
+  vm[0] = base
+  if vm.pkGetAttribute(0, cstring "_nimid", 1):
+    vm[0] = to
+    discard vm.pkSetAttribute(0, cstring "_nimid", 1)
+
+template addClass*(module0: NpVar, name: string, base0: NpVar, doc: static[string],
     ctor: untyped, dtor: untyped): NpVar =
   ## Add a class to the module with a static docstring, ctor, and dtor.
   ## If the `base` is vm.null by default it'll set to Object class
-  # module0 may be expression instead of symbol
-  let module = module0
+  # module0 and base0 may be expression instead of symbol
+  let
+    module = module0
+    base = base0
+
   assert(module of NpModule)
   let vm1 {.used.} = module.vm
 
@@ -1203,17 +1230,25 @@ template addClass*(module0: NpVar, name: string, base: NpVar, doc: static[string
       discard # nothing to do if error occurs
 
   var cls = vm1.pkNewClass(cstring name, handle(base), handle(module), ctorfn, dtorfn, doc)
-  discardable NpVar(vm: vm1, np: npObject(NpClass, cls))
+  var ret = NpVar(vm: vm1, np: npObject(NpClass, cls))
+  if base of NpClass: copyNimId(vm1, base, ret)
+  discardable ret
 
-template addClass*(module0: NpVar, name: string, base: NpVar, doc: static[string]): NpVar =
+template addClass*(module0: NpVar, name: string, base0: NpVar, doc: static[string]): NpVar =
   ## Add a class to the module with a static docstring, but no ctor or dtor.
   ## If the `base` is vm.null by default it'll set to Object class
-  # module0 may be expression instead of symbol
-  let module = module0
+  # module0 and base0 may be expression instead of symbol
+  let
+    module = module0
+    base = base0
+
   assert(module of NpModule)
   let vm = module.vm
+
   var cls = vm.pkNewClass(cstring name, handle(base), handle(module), nil, nil, doc)
-  discardable NpVar(vm: vm, np: npObject(NpClass, cls))
+  var ret = NpVar(vm: vm, np: npObject(NpClass, cls))
+  if base of NpClass: copyNimId(vm, base, ret)
+  discardable ret
 
 template addMethod*(class0: NpVar, name: string, doc: static[string], body: untyped) =
   ## Add a method to the class with a static docstring.
@@ -1365,7 +1400,7 @@ template withNimPkVm*(t: untyped, body: untyped) =
 template exportNimPk*(t: typedesc, name: string, body: untyped) =
   ## Export native code to dynamic library.
   ## Inject `self` as the module object to export.
-  ## Inject `vm` of custom type (must be `ref object of NpVm`).
+  ## Inject `vm` of custom type NpVM (must be `ref object of NpVm`).
   proc pkExportModule(pkvm: ptr PkVM): ptr PkHandle {.cdecl, exportc, dynlib.} =
     when t is ref and compiles(t() of NpVm):
       let vm {.inject, used.} = t(pkvm: pkvm)
@@ -1391,6 +1426,7 @@ template exportNimPk*(name: string, body: untyped) =
   exportNimPk(NpVm, name, body)
 
 macro def*(module: NpVar, body: untyped): untyped =
+  ## PocketLang DSL to add builtin functions to a modules.
   var doNotationAddFnMap: Table[string, NimNode]
   var doNotationAddMethodMap: Table[string, NimNode]
 

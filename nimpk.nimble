@@ -24,3 +24,6 @@ task module, "Build all the test modules":
   exec "nim c -d:release -d:strip --opt:speed --mm:orc --app:lib --outdir:build modules/bigints.nim"
   exec "nim c -d:release -d:strip --opt:speed --app:lib --outdir:build modules/pegs.nim"
   exec "nim c -d:release -d:strip --app:lib --outdir:build modules/mylib.nim"
+  if fileExists("build/libbigints.so"): mvFile("build/libbigints.so", "build/bigints.so")
+  if fileExists("build/libpegs.so"): mvFile("build/libpegs.so", "build/pegs.so")
+  if fileExists("build/libmylib.so"): mvFile("build/libmylib.so", "build/mylib.so")

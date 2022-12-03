@@ -2,15 +2,39 @@
 
 # NimPK
 
-[**PocketLang**](https://github.com/khchen/pocketlang "**PocketLang**") is a lightweight, fast embeddable scripting language. And **NimPK** is a powerful PocketLang binding for Nim.
+[**PocketLang**](https://thakeenathees.github.io/pocketlang/ "**PocketLang**") is a lightweight, fast embeddable scripting language. And **NimPK** is a powerful PocketLang binding for Nim.
 
-## Features
-- Deep integration. Nim code can access everything in VM (modules, classes, closure, variables, etc).
-- Easy-to-use macro to create native modules, classes, closures, methods, etc.
-- Bind Nim procedures as closure or method (even overloaded and generic).
-- Bind any Nim types as native class (set, object, ref, tuple, enum, whatever even char or int).
-- Automatic type conversion plus custom type conversion can convert any type between Nim value and script variable.
-- Well error handling, catching script error in Nim, or catching Nim exception in script.
+## Features of NimPK
+* Deep integration. Nim code can access everything in VM (modules, classes, closure, variables, etc).
+* Easy-to-use macro to create native modules and classes.
+* Bind Nim procedures or code block as closure or method, support  overloaded procedure, generic procedure, and varargs parameter.
+* Bind any Nim types as native class (set, object, ref, tuple, enum, whatever even char or int).
+* Automatic type conversion plus custom type conversion can convert any type between Nim value and script variable.
+* Well error handling, catching script error in Nim, or catching Nim exception in script.
+
+## Features of PocketLang NimPK Version
+NimPK use an [enhanced version of PocketLang](https://github.com/khchen/pocketlang "enhanced version of PocketLang"). Enhancements compare to original version:
+
+* String format via modulo operator.
+* Optional parameters, and arguments with default values.
+* Command like function call.
+* Conditional expression.
+* Magic methods: _getter, _setter, _call, _dict, etc.
+* Iterator protocol.
+* RegExp, Timsort, PRNG, etc via new built-in module.
+* Error handling.
+* Metaprogramming.
+* And more...
+
+Demostartion: https://github.com/khchen/pocketlang/blob/devel/tests/devel/demo.pk
+
+## Features of PocketLang CLI
+NimPK provide an enhanced version of CLI program wrote in Nim.
+
+* Script modules can be imported from a zip archive attached to the main executable, instead of from path (powered by [zippy](https://github.com/guzba/zippy "zippy")).
+* Native modules can be imported from the zip archive, too (powered by [memlib](https://github.com/khchen/memlib "memlib"), Windows only).
+* Builtin `zip` module.
+* Additional builtin functions: `echo`, `args`, `load`.
 
 ## Examples
 Run a piece of script.
@@ -22,6 +46,9 @@ vm.run """
 
 Call nim code and get the return value in script.
 ```nim
+# There are a lot of ways to bind nim code as closure in the VM.
+# Here using vm.def macro and anonymous procedure (lambda).
+
 vm.def:
   hello do (n: int) -> string:
     return fmt"Hello, world! ({n})"
@@ -31,7 +58,7 @@ vm.run """
 """
 ```
 
-Call script code and get the return value in nim.
+Run script code and get the return value in nim.
 ```nim
 var ret = vm.run """
   return "Hello, world! (3)"
@@ -39,7 +66,7 @@ var ret = vm.run """
 echo ret
 ```
 
-Call script code, run the returned closure in nim.
+Run script code, and then run the returned closure in nim.
 ```nim
 var closure = vm.run """
   return fn (n)
@@ -51,6 +78,8 @@ echo closure(4)
 
 Create a module in nim, and use it in script.
 ```nim
+# In vm.def, [] to create a module, and lambda to create module function.
+
 vm.def:
   [Module]:
     hello do (n: int) -> string:
@@ -75,12 +104,15 @@ var Foo = vm.run """
   end
   return Foo
 """
-var foo = Foo(7)
+var foo = Foo(6)
 echo foo.hello()
 ```
 
 Create a class in nim, and use it in script.
 ```nim
+# In module definition of vm.def, [] to create a class.
+# Lambda to create class methods (first parameter must be self).
+
 vm.def:
   [Module]:
     [Foo]:
@@ -92,12 +124,11 @@ vm.def:
 
 vm.run """
   from Module import Foo
-  foo = Foo(8)
+  foo = Foo(7)
   print foo.hello()
 """
 ```
-More examples: https://github.com/khchen/nimpk/tree/main/examples.
-
+More examples and tutorials: https://github.com/khchen/nimpk/tree/main/examples.
 
 ## Docs
 * https://khchen.github.io/nimpk

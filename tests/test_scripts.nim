@@ -9,7 +9,7 @@ import std/[unittest, os]
 import nimpk/src
 import nimpk
 
-const Root = "../pocketlang/tests/"
+const Root = currentSourcePath().parentDir /../ "pocketlang/tests/"
 
 const TestSuite = {
   "Unit Tests": @[

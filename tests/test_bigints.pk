@@ -1,8 +1,15 @@
+#====================================================================
+#
+#             NimPK - PocketLang Binding for Nim
+#                  Copyright (c) 2022 Ward
+#
+#====================================================================
+
 # https://www.gavalas.dev/blog/spigot-algorithms-for-pi-in-python/
 
-from bigints import BigInt as _
 from io import write, stdout
-import io
+from utils import tryLoad
+_ = tryLoad("bigints").BigInt
 
 write = fn (n) write(stdout, str(n)) end
 _0 = _(0); _1 = _(1); _2 = _(2); _3 = _(3); _4 = _(4); _5 = _(5)
