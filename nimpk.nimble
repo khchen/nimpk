@@ -1,20 +1,20 @@
 #====================================================================
 #
-#             NimPK - PocketLang Binding for Nim
-#                  Copyright (c) 2022 Ward
+#          NimPK - Pocketlang Binding for Nim Language
+#               Copyright (c) Chen Kai-Hung, Ward
 #
 #====================================================================
 
 # Package
-version       = "1.0.0"
+version       = "1.0.1"
 author        = "Ward"
-description   = "NimPK - PocketLang Binding for Nim"
+description   = "NimPK - PocketLang Binding for Nim Language"
 license       = "MIT"
 skipDirs      = @["examples", "docs"]
 
 # Dependencies
 requires "nim >= 1.6.0"
-requires "zippy >= 0.10.4"
+requires "zippy >= 0.10.5"
 requires "bigints >= 1.0.0"
 
 task cli, "Build the CLI program":

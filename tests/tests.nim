@@ -1,7 +1,7 @@
 #====================================================================
 #
-#             NimPK - PocketLang Binding for Nim
-#                  Copyright (c) 2022 Ward
+#          NimPK - Pocketlang Binding for Nim Language
+#               Copyright (c) Chen Kai-Hung, Ward
 #
 #====================================================================
 
@@ -836,7 +836,7 @@ suite "Nim Binding of PocketLang":
         # Only nearest ctor/dotr in the inheritance chain will be called
         vm.def:
           [Module]:
-            list = vm.List()
+            list = vm.list()
             [Class1]:
               ctor: vm["Module"].list.add "class1 ctor"
             [Class2] is [Class1]

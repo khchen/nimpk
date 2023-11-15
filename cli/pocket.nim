@@ -1,7 +1,7 @@
 #====================================================================
 #
-#             NimPK - PocketLang Binding for Nim
-#                  Copyright (c) 2022 Ward
+#          NimPK - Pocketlang Binding for Nim Language
+#               Copyright (c) Chen Kai-Hung, Ward
 #
 #====================================================================
 

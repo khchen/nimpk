@@ -1,7 +1,7 @@
 #====================================================================
 #
-#             NimPK - PocketLang Binding for Nim
-#                  Copyright (c) 2022 Ward
+#          NimPK - Pocketlang Binding for Nim Language
+#               Copyright (c) Chen Kai-Hung, Ward
 #
 #====================================================================
 
@@ -59,16 +59,28 @@ converter convertNpVmToPkVm*(vm: NpVm): ptr PkVM {.inline.} =
   if isOk(vm): vm.pkvm
   else: nil
 
-proc `=destroy`*(vm: var typeof(NpVm()[])) =
-  ## `=destroy` hook of NimPK VM.
-  if not vm.pkvm.isNil:
-    pkFreeVM(vm.pkvm)
-    vm.pkvm = nil
+when (NimMajor, NimMinor) >= (2, 0):
+  proc `=destroy`*(vm: typeof(NpVm()[])) =
+    ## `=destroy` hook of NimPK VM.
+    if not vm.pkvm.isNil:
+      pkFreeVM(vm.pkvm)
 
-proc `=destroy`*(x: var NpVar) =
-  ## `=destroy` hook of NpVar.
-  if isOk(x.vm) and x.np.isHandle:
-    x.vm.pkReleaseHandle(x.handle)
+  proc `=destroy`*(x: NpVar) =
+    ## `=destroy` hook of NpVar.
+    if isOk(x.vm) and x.np.isHandle:
+      x.vm.pkReleaseHandle(x.handle)
+
+else:
+  proc `=destroy`*(vm: var typeof(NpVm()[])) =
+    ## `=destroy` hook of NimPK VM.
+    if not vm.pkvm.isNil:
+      pkFreeVM(vm.pkvm)
+      vm.pkvm = nil
+
+  proc `=destroy`*(x: var NpVar) =
+    ## `=destroy` hook of NpVar.
+    if isOk(x.vm) and x.np.isHandle:
+      x.vm.pkReleaseHandle(x.handle)
 
 proc `=sink`*(x: var NpVar, y: NpVar) =
   ## `=sink` hook of NpVar.
@@ -514,7 +526,7 @@ proc toImpl[T](v: NpVar): T {.used.} =
 
 proc toNimType[T](v: NpVar): T {.used.} =
   let ok = try: v.class{"_nimid"} == getTypeId(type T)
-    except: false
+    except Defect, CatchableError: false
 
   if ok:
     result = cast[ref T](v.native)[]
@@ -1013,7 +1025,7 @@ proc addProcImpl(x: NimNode, fns: NimNode, rename: NimNode, isMethod: NimNode): 
             try:
               `varset`
               true
-            except:
+            except Defect, CatchableError:
               false
 
           if ok: `run`
@@ -1112,7 +1124,7 @@ template addFn*(vm1: NpVm, name: string, doc: static[string], body: untyped) =
     getArgs(vm2)
     try:
       body
-    except:
+    except Defect, CatchableError:
       vm2.pkSetRuntimeError(cstring getCurrentException().msg)
 
   proc wrap(pkvm: ptr PkVM) {.cdecl, gensym.} =
@@ -1149,7 +1161,7 @@ template addFn*(module0: NpVar, name: string, doc: static[string], body: untyped
     getArgs(vm2)
     try:
       body
-    except:
+    except Defect, CatchableError:
       vm2.pkSetRuntimeError(cstring getCurrentException().msg)
 
   proc wrap(pkvm: ptr PkVM) {.cdecl, gensym.} =
@@ -1214,7 +1226,7 @@ template addClass*(module0: NpVar, name: string, base0: NpVar, doc: static[strin
     let vm {.inject, used.} = getVm(pkvm)
     try:
       ctor
-    except:
+    except Defect, CatchableError:
       vm.pkSetRuntimeError(cstring getCurrentException().msg)
 
   proc dtorfn(pkvm: ptr PkVM, this: pointer) {.cdecl, genSym.} =
@@ -1226,7 +1238,7 @@ template addClass*(module0: NpVar, name: string, base0: NpVar, doc: static[strin
     let this2 {.inject, used.} = this
     try:
       dtor
-    except:
+    except Defect, CatchableError:
       discard # nothing to do if error occurs
 
   var cls = vm1.pkNewClass(cstring name, handle(base), handle(module), ctorfn, dtorfn, doc)
@@ -1268,14 +1280,14 @@ template addMethod*(class0: NpVar, name: string, doc: static[string], body: unty
         let parent = self{"_class"}{"parent"}
         try:
           superfn = parent{name}.bind(self)
-        except:
+        except Defect, CatchableError:
           raise newException(NimPkError,
             "'" & parent{"name"} & "' class has no method named '" & name & "'")
 
         superfn(superargs)
 
       body
-    except:
+    except Defect, CatchableError:
       vm2.pkSetRuntimeError(cstring getCurrentException().msg)
 
   proc wrap(pkvm: ptr PkVM) {.cdecl, gensym.} =
@@ -1347,7 +1359,7 @@ proc `[]=`*[T](v: NpVar, x: T) =
   let ok = try:
       if v of PkInstance: v.class{"_nimid"} == getTypeId(T)
       else: false
-    except: false
+    except Defect, CatchableError: false
 
   if ok:
     cast[ref T](v.native)[] = x
@@ -1411,7 +1423,7 @@ template exportNimPk*(t: typedesc, name: string, body: untyped) =
       let self {.inject, used.} = vm[0]
       try:
         body
-      except:
+      except Defect, CatchableError:
         vm.pkSetRuntimeError(cstring getCurrentException().msg)
       finally:
         return module
@@ -1579,7 +1591,7 @@ macro def*(module: NpVar, body: untyped): untyped =
         of Appending:
           var name = str(n[0][1])
           result.add quote do:
-            let hascls = try: discard `module`{`name`}; true except: false
+            let hascls = try: discard `module`{`name`}; true except Defect, CatchableError: false
             if hascls: raise newException(NimPkError,
               "Cannot reassign nim type to '" & `name` & "'.")
             else: addType(`module`, `base`, `name`)
@@ -1593,7 +1605,7 @@ macro def*(module: NpVar, body: untyped): untyped =
           var name = str(n[0][1])
           if baseKind == PkClass:
             result.add quote do:
-              let hascls = try: discard `module`{`name`}; true except: false
+              let hascls = try: discard `module`{`name`}; true except Defect, CatchableError: false
               if hascls: raise newException(NimPkError,
                 "Cannot reassign base to '" & `name` & "'.")
               else: addClass(`module`, `name`, `base`, "")
@@ -1645,7 +1657,7 @@ macro def*(module: NpVar, body: untyped): untyped =
 
         of Appending:
           result.add quote do:
-            let hascls = try: discard `module`{`classname`}; true except: false
+            let hascls = try: discard `module`{`classname`}; true except Defect, CatchableError: false
             if hascls: raise newException(NimPkError,
               "Cannot reassign nim type to '" & `classname` & "'.")
             else: `c` = addType(`module`, `base`, `classname`, `clsdoc`)
@@ -1669,7 +1681,7 @@ macro def*(module: NpVar, body: untyped): untyped =
               clsdoc.strVal != "":
 
             result.add quote do:
-              let hascls = try: discard `module`{`classname`}; true except: false
+              let hascls = try: discard `module`{`classname`}; true except Defect, CatchableError: false
               if hascls: raise newException(NimPkError,
                 "Cannot reassign base, ctor, dtor, or docstring to '" & `classname` & "'.")
               else: `c` = `addast`

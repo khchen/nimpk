@@ -1,7 +1,7 @@
 #====================================================================
 #
-#             NimPK - PocketLang Binding for Nim
-#                  Copyright (c) 2022 Ward
+#          NimPK - Pocketlang Binding for Nim Language
+#               Copyright (c) Chen Kai-Hung, Ward
 #
 #====================================================================
 
@@ -117,7 +117,9 @@ proc getTypeDescEx(n: NimNode): NimNode =
 
     while not (x of nnkSym):
       assert x of nnkBracketExpr
-      case x.getType.typekind
+
+      # nim version > 2.1 need `x.getType[0].typekind` instead of x.getType.typekind
+      case x.getType[0].typekind
       of ntyRef:
         prefix.add "ref["
         suffix.add "]"
@@ -136,9 +138,9 @@ proc getTypeDescEx(n: NimNode): NimNode =
     # and then redefine it as an new object type in a type section
     let typeSection = newTree(nnkTypeSection, x.getImpl)
     n[0] = x
-    return quote do:
+    result = quote do:
       `typeSection`
-      var x: `n`
+      var x: typeof(`n`) # nim version > 2.1 need typeof(`n`) instead of just `n`
       `prefix` & getTypeDescRaw(type x, `symbols`) & `suffix`
 
 macro getTypeDescEx(typ: typedesc): untyped =
@@ -147,7 +149,6 @@ macro getTypeDescEx(typ: typedesc): untyped =
   return getTypeDescEx(typ[1])
 
 proc getTypeDescRaw(typ: typedesc, symbols: seq[string] = @[]): string =
-
   macro names(x: varargs[untyped]): untyped =
     result = newStmtList()
     var name = ident("name")

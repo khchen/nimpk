@@ -1,7 +1,7 @@
 #====================================================================
 #
-#             NimPK - PocketLang Binding for Nim
-#                  Copyright (c) 2022 Ward
+#          NimPK - Pocketlang Binding for Nim Language
+#               Copyright (c) Chen Kai-Hung, Ward
 #
 #====================================================================
 
@@ -46,7 +46,7 @@ withNimPkVm(MyVm):
 
     # Use cached object to create instance to avoid searching module and then
     # searching class name everytime.
-    result = vm.MyVm.fooCls(f.data)
+    result = (vm.MyVm.fooCls)(f.data)
 
   vm.def:
     test:
