@@ -59,7 +59,7 @@ withNimPkVm:
   # `.()`(variable, ...) => call a method
   # `()`(variable, ...) => call a callable (closure, class, or methodbind)
   assert vm.eval of NpClosure
-  assert vm.eval("{}") of NpMap # call a builtin function
+  assert vm.eval("{}") of NpMap # call a builtin function: `eval`
   assert vm("1,2,3").split(",") == vm.eval("['1', '2', '3']") # call a method
   assert vm.eval("fn return 'hello' end") of NpClosure
   assert vm.eval("fn return 'hello' end")() == "hello" # call a closure
@@ -86,9 +86,9 @@ withNimPkVm:
   # vm.list() => create a new list, faster than vm.List()
   # vm.map() => create a new map, faster than vm.Map()
   # isNull() or isNil() => check if a NpVar is null.
-  assert vm.null of NpNull
-  assert vm.list of NpList
-  assert vm.map of NpMap
+  assert vm.null() of NpNull
+  assert vm.list() of NpList
+  assert vm.map() of NpMap
   assert isNull(vm.null)
 
   # vm.list(set)

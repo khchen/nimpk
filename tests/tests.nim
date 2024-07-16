@@ -9,6 +9,8 @@ import std/[strutils, unittest, strformat, tables]
 import nimpk/src
 import nimpk
 
+{.hint[XDeclaredButNotUsed]:off.}
+
 const
   SlotOperationsAndTypeConversions = true
   BasicVariableOperations = true
@@ -18,14 +20,17 @@ const
   ClassMethods = true
   NimTypeBinding = true
   AdvancedVMOperations = true
+  CommentStatement = if (NimMajor, NimMinor) >= (2, 0): true else: false
   OverallPocketLangDSL = true
   ErrorHandling = true
 
 suite "Nim Binding of PocketLang":
+  template declaredTrue(x: untyped): bool =
+    when declared(x): x
+    else: false
 
-  when declared(SlotOperationsAndTypeConversions):
+  when declaredTrue(SlotOperationsAndTypeConversions):
     test "Slot Operations and Type Conversions":
-
       withNimPkVm:
         # vm.`[]`(),  vm.`[]=`(): access low level VM slots as NpVar object.
         # Among all operations in NimPk, only `[]` and `[]=` won't broken the other VM slots.
@@ -122,7 +127,7 @@ suite "Nim Binding of PocketLang":
         # corresponding nim value by to[T]() proc, too.
         # This will test in NimTypeBinding part.
 
-  when declared(BasicVariableOperations):
+  when declaredTrue(BasicVariableOperations):
     test "Basic Variable Operations":
       withNimPkVm:
         # Define a builitin function for test
@@ -321,7 +326,7 @@ suite "Nim Binding of PocketLang":
           vm.String of NpClass
           vm["io"]{"File"}() of NpInstance
 
-  when declared(BuiltinFunctions):
+  when declaredTrue(BuiltinFunctions):
     test "Builtin Functions":
       withNimPkVm:
         # Builtin functions can be created by vm.addFn(name, doc): body
@@ -515,7 +520,7 @@ suite "Nim Binding of PocketLang":
           assert lambda2("12345") == 12345
         """
 
-  when declared(ModuleAndModuleFunctions):
+  when declaredTrue(ModuleAndModuleFunctions):
     test "Module and Module Functions":
       withNimPkVm:
         # Modules can be created by vm.addModule(name).
@@ -688,7 +693,7 @@ suite "Nim Binding of PocketLang":
           assert Module.lambda("12345") == 12345
         """
 
-  when declared(ClassesAndInheritance):
+  when declaredTrue(ClassesAndInheritance):
     test "Classes and Inheritance":
       withNimPkVm:
         # Classes can be created by:
@@ -855,7 +860,7 @@ suite "Nim Binding of PocketLang":
             "class3 ctor"
           ]
 
-  when declared(ClassMethods):
+  when declaredTrue(ClassMethods):
     test "Class Methods":
       withNimPkVm:
         # Methods can be created by: class.addMethod(name, doc): body
@@ -1051,7 +1056,7 @@ suite "Nim Binding of PocketLang":
           assert joe.graduates() == "Joe will graduate in 2024"
         """
 
-  when declared(NimTypeBinding):
+  when declaredTrue(NimTypeBinding):
     test "Nim Type Binding":
       withNimPkVm:
         # Any type of nim can be binded to a native class by addType(typedesc[, newname]).
@@ -1274,7 +1279,7 @@ suite "Nim Binding of PocketLang":
           assert p2.age == 25
         """
 
-  when declared(AdvancedVMOperations):
+  when declaredTrue(AdvancedVMOperations):
     test "Advanced VM Operations":
       # newVm(typedesc) => create a new NpVm. A inherited NpVm ref type is allowed.
       # withNimPkVm(typedesc): body => inject vm symbol with inherited NpVm type.
@@ -1347,10 +1352,117 @@ suite "Nim Binding of PocketLang":
           vm[1] == 123.456
           vm[3] == "hello"
 
-  when declared(OverallPocketLangDSL):
+  when declaredTrue(CommentStatement):
+    test "Comment Statement":
+      proc test1() =
+        ## original document
+        discard
+
+      withNimPkVm:
+        vm.def:
+          test1
+          test1 -> test2
+
+        check:
+          vm.test1{"_docs"} == "original document"
+          vm.test2{"_docs"} == "original document"
+
+      withNimPkVm:
+        vm.def:
+          test1
+          ## functionDocument1
+
+          test1 -> test2
+          ## functionDocument2
+
+          test3:
+            ## functionDocument3
+            discard
+
+          test4 do ():
+            ## functionDocument4
+            discard
+
+          [Module]:
+            test1
+            ## functionDocument5
+
+            test1 -> test2
+            ## functionDocument6
+
+            test3:
+              ## functionDocument7
+              discard
+
+            test4 do ():
+              ## functionDocument8
+              discard
+
+            [Class1]:
+              ## classDocument1
+
+              test1
+              ## methodDocument1
+
+              test1 -> test2
+              ## methodDocument2
+
+              test3:
+                ## methodDocument3
+                discard
+
+              test4 do ():
+                ## methodDocument4
+                discard
+
+            [Class2] of int:
+              ## classDocument2
+
+              test1
+              ## methodDocument5
+
+              test1 -> test2
+              ## methodDocument6
+
+              test3:
+                ## methodDocument7
+                discard
+
+              test4 do ():
+                ## methodDocument8
+                discard
+
+            [Class3]
+            ## classDocument3
+
+            [Class4] of int
+            ## classDocument4
+
+        check:
+          vm.test1{"_docs"} == "functionDocument1"
+          vm.test2{"_docs"} == "functionDocument2"
+          vm.test3{"_docs"} == "functionDocument3"
+          vm.test4{"_docs"} == "functionDocument4"
+          vm["Module"].test1{"_docs"} == "functionDocument5"
+          vm["Module"].test2{"_docs"} == "functionDocument6"
+          vm["Module"].test3{"_docs"} == "functionDocument7"
+          vm["Module"].test4{"_docs"} == "functionDocument8"
+          vm["Module"].Class1.test1{"_docs"} == "methodDocument1"
+          vm["Module"].Class1.test2{"_docs"} == "methodDocument2"
+          vm["Module"].Class1.test3{"_docs"} == "methodDocument3"
+          vm["Module"].Class1.test4{"_docs"} == "methodDocument4"
+          vm["Module"].Class2.test1{"_docs"} == "methodDocument5"
+          vm["Module"].Class2.test2{"_docs"} == "methodDocument6"
+          vm["Module"].Class2.test3{"_docs"} == "methodDocument7"
+          vm["Module"].Class2.test4{"_docs"} == "methodDocument8"
+          vm["Module"].Class1{"_docs"} == "classDocument1"
+          vm["Module"].Class2{"_docs"} == "classDocument2"
+          vm["Module"].Class3{"_docs"} == "classDocument3"
+          vm["Module"].Class4{"_docs"} == "classDocument4"
+
+  when declaredTrue(OverallPocketLangDSL):
     test "Overall PocketLang DSL":
       withNimPkVm:
-        # vm.run()
         vm.def:
           + "import lang; lang.PI1 = 3.14"
 
@@ -1835,8 +1947,59 @@ suite "Nim Binding of PocketLang":
           vm["Module"]{"Class"}{"PI2"} == 3.14
           vm["Module"]{"Class"}{"PI3"} == 3.14
 
+        # Anonymous proc of do notation (lambda) can be overloaded within the
+        # same vm.def scope. Works both on identifier, string, and symbol.
+        var symbol = "test3"
+        vm.def:
+          test1 do (a: int) -> auto: "int"
+          test1 do (a: string) -> auto: "string"
+          "test2" do (a: int) -> auto: "int"
+          "test2" do (a: string) -> auto: "string"
+          `symbol` do (a: int) -> auto: "int"
+          `symbol` do (a: string) -> auto: "string"
 
-  when declared(ErrorHandling):
+          [Module]:
+            test1 do (a: int) -> auto: "int"
+            test1 do (a: string) -> auto: "string"
+            "test2" do (a: int) -> auto: "int"
+            "test2" do (a: string) -> auto: "string"
+            `symbol` do (a: int) -> auto: "int"
+            `symbol` do (a: string) -> auto: "string"
+
+            [Foo]:
+              test1 do (self: NpVar, a: int) -> auto: "int"
+              test1 do (self: NpVar, a: string) -> auto: "string"
+              "test2" do (self: NpVar, a: int) -> auto: "int"
+              "test2" do (self: NpVar, a: string) -> auto: "string"
+              `symbol` do (self: NpVar, a: int) -> auto: "int"
+              `symbol` do (self: NpVar, a: string) -> auto: "string"
+
+        vm.run """
+          assert test1(1) == "int"
+          assert test1("a") == "string"
+          assert test2(1) == "int"
+          assert test2("a") == "string"
+          assert test3(1) == "int"
+          assert test3("a") == "string"
+
+          import Module
+          assert Module.test1(1) == "int"
+          assert Module.test1("a") == "string"
+          assert Module.test2(1) == "int"
+          assert Module.test2("a") == "string"
+          assert Module.test3(1) == "int"
+          assert Module.test3("a") == "string"
+
+          foo = Module.Foo()
+          assert foo.test1(1) == "int"
+          assert foo.test1("a") == "string"
+          assert foo.test2(1) == "int"
+          assert foo.test2("a") == "string"
+          assert foo.test3(1) == "int"
+          assert foo.test3("a") == "string"
+        """
+
+  when declaredTrue(ErrorHandling):
     test "Error Handling":
       withNimPkVm:
         expect NimPkError: discard vm[65536]

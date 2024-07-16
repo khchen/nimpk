@@ -18,50 +18,63 @@ withNimPkVm:
 
   # Run a piece of script.
   vm.run """
-    print "Hello, world! (1)"
+    print "Hello, world! (0)"
   """
 
-  # Call nim code and get the return value in script.
-  # There are a lot of ways to bind nim code as closure in the VM.
-  # Here using `vm.def` macro and anonymous procedure (lambda).
-  vm.def:
-    hello do (n: int) -> string:
-      return fmt"Hello, world! ({n})"
-
-  vm.run """
-    print hello(2)
-  """
-
-  # Run script code and get the return value in nim.
+  # Run the script and get the return value in nim.
   var ret = vm.run """
-    return "Hello, world! (3)"
+    return "Hello, world! (1)"
   """
   echo ret
 
-  # Run script code, and then run the returned closure in nim.
+  # Run the script, and then run the returned closure in nim using `()`.
   var closure = vm.run """
     return fn (n)
       return "Hello, world! (${n})"
     end
   """
-  echo closure(4)
+  echo closure(2)
 
-  # Create a module in nim, and use it in script.
-  # In vm.def, [] to create a module, and lambda to create module function.
+  # Bind nim code as a closure so that we can run it and get the return
+  # value in the script. Start the code binding by using the `vm.def` macro.
+  vm.def:
+
+    # There are many ways to bind nim code, here we use a named code block.
+    hello3:
+      return "Hello, world! (3)"
+
+    # Here we use an anonymous procedure (lambda).
+    hello4 do (n: int) -> string:
+      return fmt"Hello, world! ({n})"
+
+  vm.run """
+    print hello3()
+    print hello4(4)
+  """
+
+  # Create a module in nim and use it in the script.
+  # In vm.def, use `[]` to create a module, and a named code block or
+  # a lambda to create module functions.
   vm.def:
     [Module]:
-      hello do (n: int) -> string:
+      hello5:
+        echo "Hello, world! (5)"
+
+      hello6 do (n: int) -> string:
         return fmt"Hello, world! ({n})"
 
   vm.run """
     import Module
-    print Module.hello(5)
+    Module.hello5()
+    print Module.hello6(6)
   """
 
-  # Create a class in script, and use it in nim.
-  # Method 1: access the class object by vm.main.
+  # Create a class in the script and use it in nim.
+  # Method 1: Access the class object via vm.main.
   vm.def:
     testMe:
+      # `args` is injected symbol
+      # `vm.main.Foo` (NpClass) is callable; call it to create an instance.
       assert vm.main.Foo of NpClass
       var foo = vm.main.Foo(args[0])
       echo foo.hello()
@@ -76,15 +89,15 @@ withNimPkVm:
       end
     end
 
-    # Test the class in script at first.
-    foo = Foo(6)
+    # Test the class in the script first.
+    foo = Foo(7)
     print foo.hello()
 
     # Test the class in nim code.
-    testMe(7)
+    testMe(8)
   """
 
-  # Method 2: define a class and return it as class object (NpClass).
+  # Method 2: Define a class and return it as class object (NpClass).
   var fooCls = vm.run """
     class Foo
       def _init(n)
@@ -97,12 +110,14 @@ withNimPkVm:
     return Foo
   """
   assert fooCls of NpClass
-  var foo = fooCls(8)
+  var foo = fooCls(9)
   echo foo.hello()
 
-  # Create a class in nim, and use it in script.
-  # In module definition of vm.def, [] to create a class.
-  # Lambda to create class methods (first parameter must be self).
+  # Create a class in nim and use it in the script.
+  # In the module definition of vm.def, use [] to create a class.
+  # Use a lambda to create class methods (the first parameter must be self).
+  # Note that the name of a lambda can be an identifier, a string, or a symbol.
+  var symbol = "helloNext"
   vm.def:
     [Module]:
       [Foo]:
@@ -112,14 +127,20 @@ withNimPkVm:
         hello do (self: NpVar) -> string:
           return fmt"Hello, world! ({self.n})"
 
-  # Test the class in nim code at first.
-  var module = vm.import("Module")
-  foo = module.Foo(9)
-  echo foo.hello()
+        `symbol` do (self: NpVar) -> string:
+          self.n = self.n + 1
+          return fmt"Hello, world! ({self.n})"
 
-  # Test the class in script.
+  # Test the class in nim code first.
+  var module = vm.import("Module")
+  foo = module.Foo(10)
+  echo foo.hello()
+  echo foo.helloNext()
+
+  # Test the class in the script.
   vm.run """
     import Module
-    foo = Module.Foo(10)
+    foo = Module.Foo(12)
     print foo.hello()
+    print foo.helloNext()
   """

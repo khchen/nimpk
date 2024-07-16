@@ -9,7 +9,7 @@
 {.experimental: "callOperator".}
 {.experimental: "dynamicBindSym".}
 
-import std/[macros, strformat, strutils, tables, typetraits]
+import std/[macros, strformat, strutils, tables, typetraits, os, options]
 import nimpk/includes, nimpk/private/[typedescs, npbox]
 export includes, typedescs, npbox
 
@@ -38,6 +38,7 @@ type
   NpVm* = ref object of RootObj
     ## Ref object of NimPk VM.
     pkvm: ptr PkVM
+    lent: bool
 
   NpVar* = object
     ## Object of NimPk variable.
@@ -59,21 +60,27 @@ converter convertNpVmToPkVm*(vm: NpVm): ptr PkVM {.inline.} =
   if isOk(vm): vm.pkvm
   else: nil
 
-when (NimMajor, NimMinor) >= (2, 0):
+when appType == "lib":
+  {.push raises: [Exception].}
+
+const arcLike = defined(gcArc) or defined(gcAtomicArc) or defined(gcOrc)
+when defined(nimAllowNonVarDestructor) and arcLike:
   proc `=destroy`*(vm: typeof(NpVm()[])) =
     ## `=destroy` hook of NimPK VM.
-    if not vm.pkvm.isNil:
+    if not vm.pkvm.isNil and not vm.lent:
       pkFreeVM(vm.pkvm)
+      (vm.addr)[].pkvm = nil
 
   proc `=destroy`*(x: NpVar) =
     ## `=destroy` hook of NpVar.
     if isOk(x.vm) and x.np.isHandle:
       x.vm.pkReleaseHandle(x.handle)
+      (x.addr)[].vm = nil
 
 else:
   proc `=destroy`*(vm: var typeof(NpVm()[])) =
     ## `=destroy` hook of NimPK VM.
-    if not vm.pkvm.isNil:
+    if not vm.pkvm.isNil and not vm.lent:
       pkFreeVM(vm.pkvm)
       vm.pkvm = nil
 
@@ -81,6 +88,10 @@ else:
     ## `=destroy` hook of NpVar.
     if isOk(x.vm) and x.np.isHandle:
       x.vm.pkReleaseHandle(x.handle)
+      x.vm = nil
+
+when appType == "lib":
+  {.pop.}
 
 proc `=sink`*(x: var NpVar, y: NpVar) =
   ## `=sink` hook of NpVar.
@@ -109,14 +120,14 @@ proc `=copy`*(x: var NpVar, y: NpVar) =
 
 proc newVm*(config: ptr PkConfiguration = nil): NpVm =
   ## Create a new NimPk virtual machine.
-  result = NpVm(pkvm: pkNewVM(config))
+  result = NpVm(pkvm: pkNewVM(config), lent: false)
   result.pkSetUserData(cast[pointer](result))
 
 proc newVm*(T: typedesc, config: ptr PkConfiguration = nil): T =
   ## Create a new NimPk virtual machine with custom type to store user data.
   ## Custom type must be `ref object of NpVm`.
   when T is ref and compiles(T() of NpVm):
-    result = T(pkvm: pkNewVM(config))
+    result = T(pkvm: pkNewVM(config), lent: false)
     result.pkSetUserData(cast[pointer](result))
 
   else:
@@ -126,6 +137,12 @@ proc getVm*(pkvm: ptr PkVM): NpVm =
   ## Get NpVm from a raw PkVm.
   result = cast[NpVm](pkvm.pkGetUserData())
   doAssert isOk(result)
+
+proc free*(vm: NpVm) =
+  ## Free the vm forcefully.
+  if not vm.pkvm.isNil:
+    pkFreeVM(vm.pkvm)
+    vm.pkvm = nil
 
 template NpNil*: untyped =
   ## NpNull for default value of NpVar type.
@@ -859,7 +876,7 @@ proc paramsStandardize(params: NimNode): NimNode =
     else:
       result.add n
 
-proc addProcImpl(x: NimNode, fns: NimNode, rename: NimNode, isMethod: NimNode): NimNode =
+proc addProcImpl(x: NimNode, fns: NimNode, rename: NimNode, isMethod: bool, doc = none string): NimNode =
   # helper function to add nim proc into x (vm, module, or class)
   # a glue proc will be created and pass into addFn or addMethod
   # fns should be ClosedSymChoice, even there is only one procdef
@@ -892,14 +909,15 @@ proc addProcImpl(x: NimNode, fns: NimNode, rename: NimNode, isMethod: NimNode): 
     if fnImpl.len > 5 and fnImpl[5].len > 1 and fnImpl[5][1] of nnkGenericParams:
       genericParams = fnImpl[5][1]
 
-    # extract docstring
-    if body of nnkCommentStmt:
-      docs.add body.strVal.strip()
-      docs.add "\n\n"
+    # extract docstring if doc is none
+    if doc.isNone:
+      if body of nnkCommentStmt:
+        docs.add body.strVal.strip()
+        docs.add "\n\n"
 
-    elif body of nnkStmtList and body.len >= 1 and body[0] of nnkCommentStmt:
-      docs.add body[0].strVal.strip()
-      docs.add "\n\n"
+      elif body of nnkStmtList and body.len >= 1 and body[0] of nnkCommentStmt:
+        docs.add body[0].strVal.strip()
+        docs.add "\n\n"
 
     # for every parameters, create `var pn` and `pn = to[typeof pn](args[n])`
     var indexDiff = 0
@@ -1000,6 +1018,12 @@ proc addProcImpl(x: NimNode, fns: NimNode, rename: NimNode, isMethod: NimNode): 
     # for debug message
     paramsList.add params
 
+    # show the hint about glue code that was generated automatically
+    when defined(hintgluecode):
+      let procname = repr(fns) & repr(params)
+      if procname[0] != ':':
+        hint("[GlueCode] " & procname)
+
     var run = if params[0] of nnkEmpty:
       quote do:
         `call`
@@ -1032,10 +1056,12 @@ proc addProcImpl(x: NimNode, fns: NimNode, rename: NimNode, isMethod: NimNode): 
 
   # end of addBlock, addProcImpl start from here
 
+  # rename can be symbol or strlit
   var
     name = $fns
-    rename = if rename.eqIdent(""): name else: rename.strVal
-    isMethod = isMethod.eqIdent("true")
+    namesym =
+      if rename of nnkSym: rename
+      else: strlit(if rename.eqIdent(""): name else: rename.strVal)
 
   # for a method, first parameter is `self`
   if isMethod:
@@ -1049,38 +1075,43 @@ proc addProcImpl(x: NimNode, fns: NimNode, rename: NimNode, isMethod: NimNode): 
   when defined(release):
     glue.add quote do:
       raise newException(NimPkError,
-        "Incorrect arguments to call '" & `rename` & "'")
+        "Incorrect arguments to call '" & `namesym` & "'")
 
   else:
-    var msg = indent(strip(repr paramsList), 1, "  " & rename)
+    var list = strip(repr paramsList)
     glue.add quote do:
-      var msg = `msg`
-      msg.add "\n\nbut got:\n  " & `rename` & "("
+      var msg = indent(`list`, 1, "  " & `namesym`)
+      msg.add "\n\nbut got:\n  " & `namesym` & "("
       for i in 0..<args.len:
         if i != 0: msg.add ", "
         msg.add $args[i].kind
       msg.add ")"
 
       raise newException(NimPkError,
-        "Incorrect arguments to call '" & `rename` & "', expect:\n" & msg & "\n")
+        "Incorrect arguments to call '" & `namesym` & "', expect:\n" & msg & "\n")
+
+  # copy doc to docs if is some
+  if doc.isSome: docs = doc.get
 
   result = newStmtList()
   if isMethod:
-    result.add newCall("addMethod", x, strlit(rename), strlit(docs.strip()), glue)
+    result.add newCall("addMethod", x, namesym, strlit(docs.strip()), glue)
   else:
-    result.add newCall("addFn", x, strlit(rename), strlit(docs.strip()), glue)
+    result.add newCall("addFn", x, namesym, strlit(docs.strip()), glue)
 
-proc addProcSymChoice(x: NimNode, fn: NimNode, rename: NimNode, isMethod: NimNode): NimNode =
+proc addProcSymChoice(x: NimNode, fn: NimNode, rename: NimNode, isMethod: bool,
+    doc = none string): NimNode =
+
   if fn of nnkClosedSymChoice:
-    result = addProcImpl(x, fn, rename, isMethod)
+    result = addProcImpl(x, fn, rename, isMethod, doc)
 
   # elif fn of nnkSym and fn.strVal.startsWith ":anonymous":
   #   # anonymous generated by genSym, no overloaded
-  #   result = addProcImpl(x, newTree(nnkClosedSymChoice, fn), rename, isMethod)
+  #   result = addProcImpl(x, newTree(nnkClosedSymChoice, fn), rename, isMethod, doc)
 
   elif fn of nnkLambda:
     # lambda proc, no overloaded
-    result = addProcImpl(x, newTree(nnkClosedSymChoice, fn[0]), rename, isMethod)
+    result = addProcImpl(x, newTree(nnkClosedSymChoice, fn[0]), rename, isMethod, doc)
 
   else:
     # sometimes, even if there are overloaded procs, typed fn still get nnkSym
@@ -1095,18 +1126,18 @@ proc addProcSymChoice(x: NimNode, fn: NimNode, rename: NimNode, isMethod: NimNod
       macroName = genSym(nskMacro)
 
     result = quote do:
-      macro `macroName`(x: untyped, fn: untyped, rename, isMethod): untyped =
+      macro `macroName`(x, fn, rename, isMethod, doc: untyped): untyped =
         var f = bindSym(`name`)
         if f of nnkClosedSymChoice:
-          result = addProcImpl(x, f, rename, isMethod)
+          result = addProcImpl(x, f, rename, bool `isMethod`, `doc`)
 
         elif f.getImpl() of {nnkProcDef, nnkLambda, nnkFuncDef}: # for non-overloaded proc
-          result = addProcImpl(x, newTree(nnkClosedSymChoice, f), rename, isMethod)
+          result = addProcImpl(x, newTree(nnkClosedSymChoice, f), rename, bool `isMethod`, `doc`)
 
         else:
           error(fmt"Expects a proc here, get '" & $f & "'.")
 
-      `macroName`(`x`, `fn`, `rename`, `isMethod`)
+      `macroName`(`x`, `fn`, `rename`, `isMethod`, doc)
 
 proc addModule*(vm: NpVm, module: string): NpVar {.discardable.} =
   ## Add a new module to the vm.
@@ -1114,6 +1145,13 @@ proc addModule*(vm: NpVm, module: string): NpVar {.discardable.} =
   vm.pkRegisterModule(handle)
   discard vm.pkModuleInitialize(handle) # must not fail
   result = NpVar(vm: vm, np: npObject(NpModule, handle))
+
+proc addSearchPath*(vm: NpVm, path: string) =
+  ## Adds a new search paht to the VM, the path will be appended to the list of
+  ## search paths. Search path orders are the same as the registered order.
+
+  # the last character of the path **must** be a path seperator '/' or '\\'.
+  vm.pkAddSearchPath(cstring(normalizePathEnd(path) & DirSep))
 
 template addFn*(vm1: NpVm, name: string, doc: static[string], body: untyped) =
   ## Add a builtin function to the vm with a static docstring.
@@ -1146,11 +1184,17 @@ template addFn*(vm1: NpVm, name: string, doc: static[string], body: untyped) =
 macro addFn*(vm: NpVm, fn: untyped, rename = ""): untyped =
   ## Add nim proc as a builtin function to the vm.
   ## Parameters of nim proc can be `NpVm` to pass the vm.
-  result = addProcSymChoice(vm, fn, rename, ident"false")
+  result = addProcSymChoice(vm, fn, rename, false)
+
+macro addFnDoc*(vm: NpVm, fn: untyped, doc: static[string] = "", rename = "") =
+  ## Add nim proc as a builtin function to the vm.
+  ## Parameters of nim proc can be `NpVm` to pass the vm.
+  ## This macro don't extract document from proc but use custom one.
+  result = addProcSymChoice(vm, fn, rename, false, some doc)
 
 macro addFn*(vm: NpVm, name: string, fn: proc): untyped =
   ## This is a overloaded addFn macro to support lambda proc.
-  result = addProcSymChoice(vm, fn, name, ident"false")
+  result = addProcSymChoice(vm, fn, name, false)
 
 template addFn*(module0: NpVar, name: string, doc: static[string], body: untyped) =
   ## Add a new function to the module with a static docstring.
@@ -1188,11 +1232,17 @@ template addFn*(module0: NpVar, name: string, doc: static[string], body: untyped
 macro addFn*(module: NpVar, fn: untyped, rename = ""): untyped =
   ## Add nim proc as a new function to the module.
   ## Parameters of nim proc can be `NpVm` to pass the vm.
-  result = addProcSymChoice(module, fn, rename, ident"false")
+  result = addProcSymChoice(module, fn, rename, false)
+
+macro addFnDoc*(module: NpVar, fn: untyped, doc: static[string] = "", rename = ""): untyped =
+  ## Add nim proc as a new function to the module.
+  ## Parameters of nim proc can be `NpVm` to pass the vm.
+  ## This macro don't extract document from proc but use custom one.
+  result = addProcSymChoice(module, fn, rename, false, some doc)
 
 macro addFn*(module: NpVar, name: string, fn: proc): untyped =
   ## This is a overloaded addFn macro to support lambda proc.
-  result = addProcSymChoice(module, fn, name, ident"false")
+  result = addProcSymChoice(module, fn, name, false)
 
 proc addSource*(module: NpVar, source: string) =
   ## Add script code into the module and then initialize (run) it.
@@ -1314,11 +1364,19 @@ macro addMethod*(class: NpVar, fn: untyped, rename = ""): untyped =
   ## Parameters of nim proc can be `NpVm` to pass the vm.
   ## First parameter except `NpVm` will be `self`,
   ## it should correspond to the nim type of the class.
-  result = addProcSymChoice(class, fn, rename, ident"true")
+  result = addProcSymChoice(class, fn, rename, true)
+
+macro addMethodDoc*(class: NpVar, fn: untyped, doc: static[string] = "", rename = ""): untyped =
+  ## Add nim proc as a method to specified class.
+  ## Parameters of nim proc can be `NpVm` to pass the vm.
+  ## First parameter except `NpVm` will be `self`,
+  ## it should correspond to the nim type of the class.
+  ## This macro don't extract document from proc but use custom one.
+  result = addProcSymChoice(class, fn, rename, true, some doc)
 
 macro addMethod*(class: NpVar, name: string, fn: proc): untyped =
   ## This is a overloaded addMethod macro to support lambda proc.
-  result = addProcSymChoice(class, fn, name, ident"true")
+  result = addProcSymChoice(class, fn, name, true)
 
 template addType*(module0: NpVar, typ: typedesc, rename = "", doc: static[string] = ""): untyped =
   ## Add any nim type as a class into specified module.
@@ -1349,10 +1407,10 @@ template addType*(module0: NpVar, typ: typedesc, rename = "", doc: static[string
 
   discardable class
 
-template addType*(vm: NpVm, typ: typedesc, rename = ""): untyped =
+template addType*(vm: NpVm, typ: typedesc, rename = "", doc: static[string] = ""): untyped =
   ## Add nim type (enum|object|ref) as a class into `lang` module.
   var module = vm.import("lang")
-  module.addType(typ, rename)
+  module.addType(typ, rename, doc)
 
 proc `[]=`*[T](v: NpVar, x: T) =
   ## Set value to instance of nim type binded class.
@@ -1386,7 +1444,10 @@ proc startRepl*(vm: NpVm) =
 template withNimPkVmConfig*(config: ptr PkConfiguration, body: untyped) =
   ## Start a VM with given config.
   block:
-    let vm {.inject, used.} = newVm(config)
+    var vm {.inject, used.} = newVm(config)
+    defer:
+      vm.free()
+      vm = nil
     vm.pkReserveSlots(1) # mare sure fiber exists
     vm.pkSetSlotNull(0)
     if true: # avoid compile error if last call has discardable value
@@ -1395,7 +1456,10 @@ template withNimPkVmConfig*(config: ptr PkConfiguration, body: untyped) =
 template withNimPkVmConfig*(t: typedesc, config: ptr PkConfiguration, body: untyped) =
   ## Start a VM with custom type and given config.
   block:
-    let vm {.inject, used.} = newVm(t, config)
+    var vm {.inject, used.} = newVm(t, config)
+    defer:
+      vm.free()
+      vm = nil
     vm.pkReserveSlots(1) # mare sure fiber exists
     vm.pkSetSlotNull(0)
     if true: # avoid compile error if last call has discardable value
@@ -1415,7 +1479,7 @@ template exportNimPk*(t: typedesc, name: string, body: untyped) =
   ## Inject `vm` of custom type NpVM (must be `ref object of NpVm`).
   proc pkExportModule(pkvm: ptr PkVM): ptr PkHandle {.cdecl, exportc, dynlib.} =
     when t is ref and compiles(t() of NpVm):
-      let vm {.inject, used.} = t(pkvm: pkvm)
+      var vm {.inject, used.} = t(pkvm: pkvm, lent: true)
       vm.pkSetUserData(cast[pointer](vm))
       let module = vm.pkNewModule(name)
       vm.pkReserveSlots(1)
@@ -1439,8 +1503,8 @@ template exportNimPk*(name: string, body: untyped) =
 
 macro def*(module: NpVar, body: untyped): untyped =
   ## PocketLang DSL to add builtin functions to a modules.
-  var doNotationAddFnMap: Table[string, NimNode]
-  var doNotationAddMethodMap: Table[string, NimNode]
+  var doNotationAddFnMap: Table[tuple[isSym: bool, name: string], NimNode]
+  var doNotationAddMethodMap: Table[tuple[isSym: bool, name: string], NimNode]
 
   ## PocketLang DSL to add source, attributes, and classes to a module.
   result = newStmtList()
@@ -1460,8 +1524,11 @@ macro def*(module: NpVar, body: untyped): untyped =
 
   defer:
     # call `addFn` at last
-    for name, symbol in doNotationAddFnMap:
-      result.add newCall("addFn", module, symbol, strlit(name))
+    for tup, procsym in doNotationAddFnMap:
+      let (isSym, name) = tup
+      result.add newCall("addFn", module, procsym,
+        if isSym: ident(name) else: strlit(name)
+      )
 
     # wrap all in a block
     result = newBlockStmt(result)
@@ -1472,11 +1539,11 @@ macro def*(module: NpVar, body: untyped): untyped =
     var `c` {.used.}: NpVar
 
   body.expectKind(nnkStmtList)
-  for n in body:
-    var n = n
-
-    # base = vm.null
+  for i in 0..<body.len:
     var
+      n = body[i]
+      nextNode = if i+1 >= body.len: nil else: body[i+1]
+
       base = newDotExpr(ident("vm"), ident("null"))
       baseKind = None
       hasbase = false
@@ -1512,33 +1579,39 @@ macro def*(module: NpVar, body: untyped): untyped =
     # name or "name" or `name`: body => module.addFn("name", doc, body)
     elif n of nnkCall and n.len == 2 and n[0] of {nnkIdent, nnkStrLit, nnkAccQuoted} and
         n[1] of nnkStmtList:
-
       result.add newCall("addFn", module, str(n[0]), doc(n[1]), n[1])
       continue
 
     # name => module.addFn(name)
     elif n of nnkIdent:
-      result.add newCall("addFn", module, n)
+      if nextNode of nnkCommentStmt:
+        result.add newCall("addFnDoc", module, n, strlit(nextNode))
+      else:
+        result.add newCall("addFn", module, n)
       continue
 
     # name -> newname or "newname" or `newname` => module.addFn(name, "newname")
     elif n of nnkInfix and n.len == 3 and n[0] == ident("->") and
         n[1] of {nnkIdent, nnkAccQuoted} and
         n[2] of {nnkIdent, nnkStrLit, nnkAccQuoted}:
-      result.add newCall("addFn", module, n[1], str(n[2]))
+      if nextNode of nnkCommentStmt:
+        result.add newCall("addFnDoc", module, n[1], strlit(nextNode), str(n[2]))
+      else:
+        result.add newCall("addFn", module, n[1], str(n[2]))
       continue
 
     # name do: or "name" do: or `name` do: => module.addFn(anonymous, "name")
     elif n of nnkCall and n.len == 2 and n[1] of nnkDo:
-      var
+      let
+        isSym = n[0] of nnkAccQuoted
         name = $str(n[0])
-        symbol = doNotationAddFnMap.mgetOrPut(name,
+        procsym = doNotationAddFnMap.mgetOrPut((isSym, name),
           ident(repr genSym(nskProc, ":" & name)) # -> this line generate unique symobl
         )
-        procdef = newNimNode(nnkProcDef)
 
+      var procdef = newNimNode(nnkProcDef)
       n[1].copyChildrenTo(procdef)
-      procdef.name = symbol
+      procdef.name = procsym
       result.add procdef
       continue
 
@@ -1578,6 +1651,10 @@ macro def*(module: NpVar, body: untyped): untyped =
         (n[0] of {nnkIdent, nnkStrLit, nnkAccQuoted} or
         deprefix(n[0], "+") of {nnkIdent, nnkStrLit, nnkAccQuoted}):
 
+      let clsdoc =
+        if nextNode of nnkCommentStmt: strlit(nextNode)
+        else: strlit("")
+
       let mode =
         if n[0] of {nnkIdent, nnkStrLit, nnkAccQuoted}: Overwriting
         else: Appending
@@ -1586,7 +1663,7 @@ macro def*(module: NpVar, body: untyped): untyped =
       of NimType:
         case mode
         of Overwriting:
-          result.add newCall("addType", module, base, str(n[0]))
+          result.add newCall("addType", module, base, str(n[0]), clsdoc)
 
         of Appending:
           var name = str(n[0][1])
@@ -1594,12 +1671,12 @@ macro def*(module: NpVar, body: untyped): untyped =
             let hascls = try: discard `module`{`name`}; true except Defect, CatchableError: false
             if hascls: raise newException(NimPkError,
               "Cannot reassign nim type to '" & `name` & "'.")
-            else: addType(`module`, `base`, `name`)
+            else: addType(`module`, `base`, `name`, `clsdoc`)
 
       of PkClass, None:
         case mode
         of Overwriting:
-          result.add newCall("addClass", module, str(n[0]), base, strlit(""))
+          result.add newCall("addClass", module, str(n[0]), base, clsdoc)
 
         of Appending:
           var name = str(n[0][1])
@@ -1608,11 +1685,11 @@ macro def*(module: NpVar, body: untyped): untyped =
               let hascls = try: discard `module`{`name`}; true except Defect, CatchableError: false
               if hascls: raise newException(NimPkError,
                 "Cannot reassign base to '" & `name` & "'.")
-              else: addClass(`module`, `name`, `base`, "")
+              else: addClass(`module`, `name`, `base`, `clsdoc`)
           else:
             result.add quote do:
               try: discard `module`{`name`}
-              except NimPkError: addClass(`module`, `name`, `base`, "")
+              except NimPkError: addClass(`module`, `name`, `base`, `clsdoc`)
 
     # [name]: or ["name"] or [`name`]: => c = module.addClass("name", base, doc, [, ctor, dtor])
     # [+name]: or [+"name"] or [+`name`]: => c = module{""} or module.addClass(...)
@@ -1697,10 +1774,17 @@ macro def*(module: NpVar, body: untyped): untyped =
 
       # call `addMethod` at last
       defer:
-        for name, symbol in doNotationAddMethodMap:
-          result.add newCall("addMethod", ident("c"), symbol, strlit(name))
+        for tup, procsym in doNotationAddMethodMap:
+          let (isSym, name) = tup
+          result.add newCall("addMethod", ident("c"), procsym,
+            if isSym: ident(name) else: strlit(name)
+          )
 
-      for n in n[1]:
+      for i in 0..<n[1].len:
+        let
+          nextNode = if i+1 >= n[1].len: nil else: n[1][i+1]
+          n = n[1][i]
+
         # block: body => nim code
         if n of nnkBlockStmt and n.len == 2:
           result.add n[1]
@@ -1721,31 +1805,33 @@ macro def*(module: NpVar, body: untyped): untyped =
 
         # name => c.addMethod(name)
         elif n of nnkIdent:
-          result.add newCall("addMethod", ident("c"), n)
+          if nextNode of nnkCommentStmt:
+            result.add newCall("addMethodDoc", ident("c"), n, strlit(nextNode))
+          else:
+            result.add newCall("addMethod", ident("c"), n)
 
         # name -> newname or "newname" or `newname` => c.addMethod(name, "rename")
         elif n of nnkInfix and n.len == 3 and n[0] == ident("->") and
             n[1] of {nnkIdent, nnkAccQuoted} and
             n[2] of {nnkIdent, nnkStrLit, nnkAccQuoted}:
 
-          # result.add newCall("addMethod", ident("c"), n[1], n[2])
-          let
-            sym = n[1]
-            name = str(n[2])
-
-          result.add quote do: addMethod(`c`, `sym`, `name`)
+          if nextNode of nnkCommentStmt:
+            result.add newCall("addMethodDoc", ident("c"), n[1], strlit(nextNode), str(n[2]))
+          else:
+            result.add newCall("addMethod", ident("c"), n[1], str(n[2]))
 
         # name do: or "name" do: or `name` do: => c.addMethod(anonymous, "name")
         elif n of nnkCall and n.len == 2 and n[1] of nnkDo:
-          var
+          let
+            isSym = n[0] of nnkAccQuoted
             name = $str(n[0])
-            symbol = doNotationAddMethodMap.mgetOrPut(name,
+            procsym = doNotationAddMethodMap.mgetOrPut((isSym, name),
               ident(repr genSym(nskProc, ":" & name)) # -> this line generate unique symobl
             )
-            procdef = newNimNode(nnkProcDef)
 
+          var procdef = newNimNode(nnkProcDef)
           n[1].copyChildrenTo(procdef)
-          procdef.name = symbol
+          procdef.name = procsym
           result.add procdef
 
         elif not (n of {nnkCommentStmt, nnkDiscardStmt}):
@@ -1756,13 +1842,16 @@ macro def*(module: NpVar, body: untyped): untyped =
 
 macro def*(vm: NpVm, body: untyped): untyped =
   ## PocketLang DSL to add builtin functions and modules to the vm.
-  var doNotationAddFnMap: Table[string, NimNode]
+  var doNotationAddFnMap: Table[tuple[isSym: bool, name: string], NimNode]
   result = newStmtList()
 
   defer:
     # call `addFn` at last
-    for name, symbol in doNotationAddFnMap:
-      result.add newCall("addFn", vm, symbol, strlit(name))
+    for tup, procsym in doNotationAddFnMap:
+      let (isSym, name) = tup
+      result.add newCall("addFn", vm, procsym,
+        if isSym: ident(name) else: strlit(name)
+      )
 
     # wrap all in a block
     result = newBlockStmt(result)
@@ -1773,7 +1862,11 @@ macro def*(vm: NpVm, body: untyped): untyped =
     var `m` {.used.}: NpVar
 
   body.expectKind(nnkStmtList)
-  for n in body:
+  for i in 0..<body.len:
+    var
+      n = body[i]
+      nextNode = if i+1 >= body.len: nil else: body[i+1]
+
     # block: body => nim code
     if n of nnkBlockStmt and n.len == 2:
       result.add n[1]
@@ -1793,13 +1886,19 @@ macro def*(vm: NpVm, body: untyped): untyped =
 
     # name => vm.addFn(name)
     elif n of nnkIdent:
-      result.add newCall("addFn", vm, n)
+      if nextNode of nnkCommentStmt:
+        result.add newCall("addFnDoc", vm, n, strlit(nextNode))
+      else:
+        result.add newCall("addFn", vm, n)
 
     # name -> newname or "newname" or `newname` => vm.addFn(name, "newname")
     elif n of nnkInfix and n.len == 3 and n[0] == ident("->") and
         n[1] of {nnkIdent, nnkAccQuoted} and
         n[2] of {nnkIdent, nnkStrLit, nnkAccQuoted}:
-      result.add newCall("addFn", vm, n[1], str(n[2]))
+      if nextNode of nnkCommentStmt:
+        result.add newCall("addFnDoc", vm, n[1], strlit(nextNode), str(n[2]))
+      else:
+        result.add newCall("addFn", vm, n[1], str(n[2]))
 
     # name do: or "name" do: or `name` do: => vm.addFn(anonymous, "name")
     elif n of nnkCall and n.len == 2 and n[1] of nnkDo:
@@ -1807,15 +1906,18 @@ macro def*(vm: NpVm, body: untyped): untyped =
       #  1. must be in the same def macro section
       #  2. the same name produce the same unique symbol
       #  3. call `addFn` at last of the macro so that it can use the overloaded procs
-      var
+      # Because nnkAccQuoted must be handle in different way,
+      # overloading between name do: and `name` do: is not possible.
+      let
+        isSym = n[0] of nnkAccQuoted
         name = $str(n[0])
-        symbol = doNotationAddFnMap.mgetOrPut(name,
+        procsym = doNotationAddFnMap.mgetOrPut((isSym, name),
           ident(repr genSym(nskProc, ":" & name)) # -> this line generate unique symobl
         )
-        procdef = newNimNode(nnkProcDef)
 
+      var procdef = newNimNode(nnkProcDef)
       n[1].copyChildrenTo(procdef)
-      procdef.name = symbol
+      procdef.name = procsym
       result.add procdef
 
     # [name] or ["name"] or [`name`] => vm.addModule("name")

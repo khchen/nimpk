@@ -6,11 +6,12 @@
 #====================================================================
 
 # Package
-version       = "1.0.1"
+version       = "1.0.2"
 author        = "Ward"
 description   = "NimPK - PocketLang Binding for Nim Language"
 license       = "MIT"
 skipDirs      = @["examples", "docs"]
+installDirs   = @["pocketlang"]
 
 # Dependencies
 requires "nim >= 1.6.0"

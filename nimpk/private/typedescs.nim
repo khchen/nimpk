@@ -136,10 +136,18 @@ proc getTypeDescEx(n: NimNode): NimNode =
     # for :ObjectType with generic, there is no simple way to get concrete definition
     # here we resolve the generic type by replace the n(ref or ptr) to :ObjectType,
     # and then redefine it as an new object type in a type section
-    let typeSection = newTree(nnkTypeSection, x.getImpl)
+    var ts = newTree(nnkTypeSection, x.getImpl)
+
+    # nim verion > 2.1.9: 'export' is only allowed at top level
+    # here remove "*" marker in the type definition
+    if ts of nnkTypeSection and ts.len != 0:
+      if ts[0] of nnkTypeDef and ts[0].len != 0:
+        if ts[0][0] of nnkPostfix and ts[0][0][0].eqIdent("*"):
+          ts[0][0] = ts[0][0][1]
+
     n[0] = x
     result = quote do:
-      `typeSection`
+      `ts`
       var x: typeof(`n`) # nim version > 2.1 need typeof(`n`) instead of just `n`
       `prefix` & getTypeDescRaw(type x, `symbols`) & `suffix`
 
